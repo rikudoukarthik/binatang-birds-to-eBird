@@ -1,55 +1,83 @@
 ############## Modifying PNG birds data for eBird upload #############
-######################################################################
 ### Bird surveys conducted by Katerina Sam and New Guinea Binatang Research Centre ###
 ### from 2010 to 2015. Modifying raw data to make it suitable for upload to eBird. ###
 ############### Code by Karthik Thrikkadeeri (June 2021) ##############
+######################################################################
 
-# library ####
 library(tidyverse)
 library(lubridate)
 
+
+
 # importing ####
 
-# species codes with corresponding scientific names from raw data file (Sheet "PNGspec")
+# species codes with corresponding scientific names from sheet "PNGspec"
 # splitting to Genus and Species
-spec_info <- read.delim("clipboard", as.is = F) %>% 
-  separate(ScientificName, into = c("Genus","Species"), sep = " ") %>% 
-  mutate(Genus = as.factor(Genus), Species = as.factor(Species))
+spec_info <- readxl::read_xlsx("PNGbirds_RAWdata_20210625.xlsx", sheet = "PNGspec") %>% 
+  separate(ScientificName, into = c("Genus","Species"), sep = " ")
 
-# GPS coordinates of survey points from raw data file (Sheet "GPS")
-point_info <- read.delim("clipboard", as.is = F)
+# GPS coordinates of survey points from sheet "GPS"
+point_info <- readxl::read_xlsx("PNGbirds_RAWdata_20210625.xlsx", 
+                                sheet = "GPS", range = "A1:D305")
 
 # Point Count data
-birds_PC <- read.delim("clipboard", as.is = F)
+birds_PC <- readxl::read_xlsx("PNGbirds_RAWdata_20210625.xlsx", sheet = "PointCounts") %>% 
+  rename(Conditions_ID = Conditions.ID,
+         Start_time = `Start time`,
+         Stop_time = `Stop time`) %>% 
+  mutate(Start_time = hms::as_hms(Start_time),
+         Stop_time = hms::as_hms(Stop_time))
 
 # MacKinnon data
-birds_MK <- read.delim("clipboard", as.is = F)
+birds_MK <- readxl::read_xlsx("PNGbirds_RAWdata_20210625.xlsx", sheet = "MacKinnon") %>% 
+  rename(Survey_no = `Survey No.`,
+         Start_time = `Start time`,
+         Stop_time = `Stop time`) %>% 
+  mutate(Start_time = hms::as_hms(Start_time),
+         Stop_time = hms::as_hms(Stop_time))
 
 # mistnetting data
-birds_MN <- read.delim("clipboard", as.is = F)
+birds_MN <- readxl::read_xlsx("PNGbirds_RAWdata_20210625.xlsx", sheet = "Mistnetting") %>% 
+  rename(Patrol_Day = `Patrol Day`,
+         Start_time = `Start time`,
+         Stop_time = `Stop time`) %>% 
+  mutate(Start_time = hms::as_hms(Start_time),
+         Stop_time = hms::as_hms(Stop_time),
+         Time = hms::as_hms(Time))
 
 
 # modifying point counts ####
 
 # summarising observations of same species in same survey by introducing Number column
-PointCounts <- inner_join(birds_PC, spec_info, by = "Spec_Code") %>% 
-  select(-c(1:4, 6:7, 11:14, 17:18)) %>% 
-  group_by(Date, Start.time, Stop.time, Plot_Point, Observer, Spec_Code, Genus, Species) %>% 
-  summarise(Number = n()) %>% mutate(LocationName = Plot_Point) %>% 
-  inner_join(point_info, by = "Plot_Point") %>% 
-  mutate(Protocol = "Stationary", NumberofObservers = 1, 
+pointcounts <- birds_PC %>% 
+  select(Plot_Point, Date, Start_time, Stop_time, Observer, Spec_Code) %>% 
+  group_by(Date, Start_time, Stop_time, Plot_Point, Observer, Spec_Code) %>% 
+  summarise(Number = n()) %>% 
+  ungroup() %>% 
+  left_join(spec_info, by = "Spec_Code") %>% 
+  left_join(point_info, by = "Plot_Point") %>% 
+  mutate(Protocol = "Stationary", 
+         NumberofObservers = 1, 
          Duration = 15, 
          Allobservationsreported = "Y",
          Submissioncomments = paste0("Observation by ",
-                                     ifelse(Observer=="Bonny", "Bonny Koane",
-                                            ifelse(Observer=="Katka", "Katerina Sam",
-                                                   "Samuel Jeppy")), "."),
-         SpeciesComments = ifelse(Spec_Code=="CharStel", "ssp. stellae",
-                           ifelse(Spec_Code=="PhylPoli", "ssp. poliocephalus", ""))) %>% 
-  ungroup() %>% select(-c(3:6))
+                                     case_when(Observer == "Bonny" ~ "Bonny Koane",
+                                               Observer == "Katka" ~ "Katerina Sam",
+                                               TRUE ~ "Samuel Jeppy"),
+                                     "."),
+         SpeciesComments = case_when(Spec_Code == "CharStel" ~ "ssp. stellae",
+                                     Spec_Code == "PhylPoli" ~ "ssp. poliocephalus",
+                                     TRUE ~ "")) %>% 
+  mutate(Commonname = "", State = "", Countrycode = "", Distance = "", Area = "") %>% 
+  # ordering columns according to eBird template
+  select(Commonname, Genus, Species, Number, SpeciesComments, Plot_Point, Latitude,
+         Longitude, Date, Start_time, State, Countrycode, Protocol, NumberofObservers,
+         Duration, Allobservationsreported, Distance, Area, Submissioncomments) %>% 
+  arrange(Date, Start_time) %>% 
+  mutate(Date = as.character(Date))
 
-write.csv(PointCounts, file = "PNGbirds_foreBird_PointCounts.csv", quote = F,
-          row.names = F, col.names = F)
+write_csv(pointcounts, file = "PNGbirds_foreBird_PointCounts.csv", 
+          col_names = F)
 
 
 
